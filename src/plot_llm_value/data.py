@@ -33,6 +33,19 @@ def split_effort(name):
     match = re.search(r"\s+\(([^()]*)\)$", name)
     if match:
         suffix = match[1].strip().casefold()
+        verbose = re.fullmatch(
+            r"(adaptive reasoning|non-reasoning),\s*(minimal|low|medium|high|xhigh|max|ultra) effort"
+            r"(?:,\s*(.+ fallback))?",
+            suffix,
+        )
+        if verbose:
+            effort = verbose[2]
+            if verbose[1] == "non-reasoning":
+                effort = "non-reasoning, " + effort
+            if verbose[3]:
+                fallback = "fallback" if verbose[3] == "default fallback" else verbose[3]
+                effort += " with " + fallback
+            return name[: match.start()], effort
         if (
             re.fullmatch(
                 r"(?:non-reasoning(?:,\s*(?:low|medium|high))?|none|minimal|low|"
@@ -49,7 +62,7 @@ def split_effort(name):
 def effort_order(effort):
     if effort is None:
         return (-1, "")
-    base = effort.removesuffix(" with fallback")
+    base = effort.partition(" with ")[0]
     if base.startswith("non-reasoning"):
         qualifier = base.partition(",")[2].strip()
         return ({"low": 0.1, "medium": 0.2, "high": 0.3}.get(qualifier, 0), base)

@@ -125,3 +125,34 @@ def test_nonreasoning_sub_efforts_sort_low_to_high():
         "low",
         "high",
     ]
+
+
+@pytest.mark.parametrize(
+    "name,family,effort",
+    [
+        ("Claude Opus 5 (Adaptive Reasoning, High Effort)", "Claude Opus 5", "high"),
+        (
+            "Claude Sonnet 4.6 (Non-reasoning, Low Effort)",
+            "Claude Sonnet 4.6",
+            "non-reasoning, low",
+        ),
+        (
+            "Claude Fable 5.1 (Adaptive Reasoning, Xhigh Effort, Default Fallback)",
+            "Claude Fable 5.1",
+            "xhigh with fallback",
+        ),
+        (
+            "Claude Fable 5 (Adaptive Reasoning, Max Effort, Opus 4.8 Fallback)",
+            "Claude Fable 5",
+            "max with opus 4.8 fallback",
+        ),
+    ],
+)
+def test_live_aa_verbose_effort_names(name, family, effort):
+    assert split_effort(name) == (family, effort)
+
+
+def test_named_fallback_preserves_effort_order():
+    from plot_llm_value.data import effort_order
+
+    assert effort_order("low with opus 4.8 fallback") < effort_order("high")
