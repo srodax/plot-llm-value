@@ -33,12 +33,16 @@ def _arguments(argv):
     parser.add_argument("--reasoning-only", action="store_true")
     parser.add_argument("--linear-x", action="store_true")
     parser.add_argument("--no-pareto", action="store_true")
+    parser.add_argument("--no-capability-lines", action="store_true")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--env-file", type=Path)
     args = parser.parse_args(argv)
-    if command != "plot" and (args.linear_x or args.no_pareto or args.output):
-        raise SelectionError("--linear-x, --no-pareto and --output are plot-only options.")
+    plot_only = (args.linear_x, args.no_pareto, args.no_capability_lines, args.output)
+    if command != "plot" and any(plot_only):
+        raise SelectionError(
+            "--linear-x, --no-pareto, --no-capability-lines and --output are plot-only options."
+        )
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         raise SelectionError("--timeout must be positive and finite.")
     if args.output and args.output.suffix.lower() not in {".png", ".svg", ".pdf"}:
@@ -94,6 +98,7 @@ def main(argv=None):
                     linear_x=args.linear_x,
                     pareto=not args.no_pareto,
                     reasoning_only=args.reasoning_only,
+                    capability_lines=not args.no_capability_lines,
                 )
         result["filters"] = {"reasoning_only": args.reasoning_only}
         print(json.dumps(result, ensure_ascii=False, allow_nan=False, indent=2))

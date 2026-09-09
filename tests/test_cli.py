@@ -71,6 +71,9 @@ def test_plot_reports_the_frontier_and_no_pareto_is_accepted(live_api, capsys, t
     )
     assert main(["--no-pareto", "--output", str(path)]) == 0
     assert len(json.loads(capsys.readouterr().out)["pareto_frontier"]) == 5
+    assert main(["--no-capability-lines", "--output", str(path)]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["capability_lines_drawn"] is False and len(result["capability_only"]) == 2
 
 
 def test_reasoning_only_drops_marked_variants_and_keeps_unqualified_models(live_api, capsys):
@@ -114,6 +117,7 @@ def test_catalog_retains_missing_scores_and_prints_selectors(live_api, capsys):
         ["--model", "Alpha", "--variant", "id-0"],
         ["data", "--linear-x"],
         ["data", "--no-pareto"],
+        ["models", "--no-capability-lines"],
         ["data", "--output", "x.png"],
         ["--timeout", "nan"],
         ["--timeout", "-1"],

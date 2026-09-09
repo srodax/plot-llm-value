@@ -24,6 +24,9 @@ COLORS = ["#6B4F9B", "#D97745", "#2C7A7B", "#4C78A8", "#59A14F", "#B279A2", "#8C
 MARKERS = ["o", "s", "^", "D", "v", "P", "X", "<", ">", "h", "*"]
 PARETO_COLOR = "#4A4A4A"
 PARETO_DASHES = (7, 3.5)
+# Past this many scored-but-unpriced rows, full-width capability lines stop
+# aiding the eye and start hiding the priced points; the rows stay in the JSON.
+CAPABILITY_LINE_LIMIT = 12
 
 
 def _place_labels(ax, requests, point_positions, segments):
@@ -150,7 +153,9 @@ def _inferred_cost(row, gaps, *, linear_x):
     return None
 
 
-def build_figure(comparison, *, linear_x=False, pareto=True, reasoning_only=False):
+def build_figure(
+    comparison, *, linear_x=False, pareto=True, reasoning_only=False, capability_lines=True
+):
     groups, capability_only, excluded = defaultdict(list), defaultdict(list), []
     for row in comparison["rows"]:
         key = (row["provider_id"], row["family"])
@@ -170,7 +175,8 @@ def build_figure(comparison, *, linear_x=False, pareto=True, reasoning_only=Fals
         )
     count = sum(map(len, groups.values()))
     flat = [entry for entries in capability_only.values() for entry in entries]
-    label_count = count + len(groups) + 2 * len(flat)
+    draw_capability_lines = capability_lines and len(flat) <= CAPABILITY_LINE_LIMIT
+    label_count = count + len(groups) + (2 * len(flat) if draw_capability_lines else 0)
     scale = max(1, math.sqrt(label_count / 45))
     providers = sorted({r["provider"] for rows in groups.values() for r in rows})
     marker_map = {p: MARKERS[i % len(MARKERS)] for i, p in enumerate(providers)}
@@ -223,14 +229,17 @@ def build_figure(comparison, *, linear_x=False, pareto=True, reasoning_only=Fals
                     else None
                 )
                 if guess is None:
-                    line = ax.axhline(row["score"], color=color, lw=0.7, alpha=0.55, zorder=1.2)
-                    line.set_gid(f"capability:{row['id']}")
-                    # An unavailable cost is what the line itself means; a measured
-                    # zero cost is a different fact and still worth spelling out.
-                    label = (
-                        row["name"] if reason == "cost unavailable" else f"{row['name']} · {reason}"
-                    )
-                    flat_labels.append((label, row["score"], color))
+                    if draw_capability_lines:
+                        line = ax.axhline(row["score"], color=color, lw=0.7, alpha=0.55, zorder=1.2)
+                        line.set_gid(f"capability:{row['id']}")
+                        # An unavailable cost is what the line itself means; a measured
+                        # zero cost is a different fact and still worth spelling out.
+                        label = (
+                            row["name"]
+                            if reason == "cost unavailable"
+                            else f"{row['name']} · {reason}"
+                        )
+                        flat_labels.append((label, row["score"], color))
                     flat_rows.append(
                         {
                             "id": row["id"],
@@ -252,7 +261,10 @@ def build_figure(comparison, *, linear_x=False, pareto=True, reasoning_only=Fals
                         }
                     )
             if not rows:
-                handles.append(Line2D([], [], color=color, lw=0.7, label=family))
+                # A family with only capability lines has no legend entry when
+                # those lines are not drawn: nothing on the canvas would match it.
+                if draw_capability_lines:
+                    handles.append(Line2D([], [], color=color, lw=0.7, label=family))
                 continue
             marker = marker_map[rows[0]["provider"]]
             xy = [(r["cost_per_task_usd"], r["score"]) for r in rows]
@@ -397,39 +409,44 @@ def build_figure(comparison, *, linear_x=False, pareto=True, reasoning_only=Fals
                 )
             )
         source = comparison.get("source", {})
-        fig.text(
-            0.095,
-            0.025,
-            "Source: Artificial Analysis · https://artificialanalysis.ai/\n"
-            f"Retrieved {source.get('retrieved_at', 'unknown')} · Intelligence Index v{source.get('intelligence_index_version', '?')}\n"
-            f"{count} / {len(comparison['rows'])} rows plotted · Dashed color: effort gap · Costs use Intelligence Index tasks"
-            + (
-                "\nNon-reasoning variants excluded (--reasoning-only), so the frontier "
+        notes = [
+            "Source: Artificial Analysis · https://artificialanalysis.ai/",
+            f"Retrieved {source.get('retrieved_at', 'unknown')} · "
+            f"Intelligence Index v{source.get('intelligence_index_version', '?')}",
+            f"{count} / {len(comparison['rows'])} rows plotted · Dashed color: effort gap · "
+            "Costs use Intelligence Index tasks",
+        ]
+        if reasoning_only:
+            notes.append(
+                "Non-reasoning variants excluded (--reasoning-only), so the frontier "
                 "describes reasoning settings only"
-                if reasoning_only
-                else ""
             )
-            + (
-                f"\n{len(flat_labels)} scored row(s) have no plottable cost: thin capability line "
+        if flat_rows and draw_capability_lines:
+            notes.append(
+                f"{len(flat_rows)} scored row(s) have no plottable cost: thin capability line "
                 "at the score, kept off the frontier"
-                if flat_labels
-                else ""
             )
-            + (
-                f"\n{len(inferred_rows)} unpriced effort(s) sit hollow on their dashed gap: score "
+        elif flat_rows:
+            why = (
+                "--no-capability-lines"
+                if not capability_lines
+                else f"more than {CAPABILITY_LINE_LIMIT} would clutter the plot"
+            )
+            notes.append(
+                f"{len(flat_rows)} scored row(s) have no plottable cost: not drawn ({why}); "
+                "listed in capability_only"
+            )
+        if inferred_rows:
+            notes.append(
+                f"{len(inferred_rows)} unpriced effort(s) sit hollow on their dashed gap: score "
                 "measured, cost interpolated by effort rank, kept off the frontier"
-                if inferred_rows
-                else ""
             )
-            + (
-                "\nDashed grey Pareto frontier: no plotted model is both cheaper and at least as capable"
-                if len(frontier_xy) > 1
-                else ""
-            ),
-            fontsize=6.5,
-            color="#666666",
-            linespacing=1.4,
-        )
+        if len(frontier_xy) > 1:
+            notes.append(
+                "Dashed grey Pareto frontier: no plotted model is both cheaper and at least "
+                "as capable"
+            )
+        fig.text(0.095, 0.025, "\n".join(notes), fontsize=6.5, color="#666666", linespacing=1.4)
         fig.canvas.draw()
         renderer = fig.canvas.get_renderer()
         footer_top = fig.texts[-1].get_window_extent(renderer).y1
@@ -467,6 +484,8 @@ def build_figure(comparison, *, linear_x=False, pareto=True, reasoning_only=Fals
                 "excluded_count": len(excluded),
                 "excluded": excluded,
                 "capability_only": flat_rows,
+                "capability_lines_drawn": draw_capability_lines,
+                "capability_line_limit": CAPABILITY_LINE_LIMIT,
                 "inferred_cost": inferred_rows,
                 "x_scale": "linear" if linear_x else "log",
                 "pareto_frontier": [
@@ -485,7 +504,15 @@ def build_figure(comparison, *, linear_x=False, pareto=True, reasoning_only=Fals
     )
 
 
-def save_plot(comparison, path=None, *, linear_x=False, pareto=True, reasoning_only=False):
+def save_plot(
+    comparison,
+    path=None,
+    *,
+    linear_x=False,
+    pareto=True,
+    reasoning_only=False,
+    capability_lines=True,
+):
     if path is not None:
         path = Path(path).expanduser().resolve()
         if path.suffix.lower() not in {".png", ".svg", ".pdf"}:
@@ -493,7 +520,11 @@ def save_plot(comparison, path=None, *, linear_x=False, pareto=True, reasoning_o
         if not path.parent.is_dir():
             raise OSError("Output parent directory does not exist.")
     fig, info = build_figure(
-        comparison, linear_x=linear_x, pareto=pareto, reasoning_only=reasoning_only
+        comparison,
+        linear_x=linear_x,
+        pareto=pareto,
+        reasoning_only=reasoning_only,
+        capability_lines=capability_lines,
     )
     try:
         if path is None:

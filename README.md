@@ -83,6 +83,12 @@ with the reason and listed in `capability_only`. Only a missing score drops a ro
 from the plot. A selection where nothing has a measured cost fails, because a cost
 axis with no costs on it would be fiction.
 
+Full-width lines scale badly: a whole-provider selection can carry sixty unpriced
+rows, and that many lines bury the priced points. Past twelve, none are drawn, the
+footer says so, and `capability_lines_drawn` in the result is `false` while
+`capability_only` still lists every row. `--no-capability-lines` omits them at any
+count.
+
 An unpriced reasoning setting whose **effort rank falls inside a dashed gap of its
 own family** is instead drawn as a hollow point on that dashed segment, its effort
 label suffixed `?`, and listed in `inferred_cost` with the two neighbours it sits

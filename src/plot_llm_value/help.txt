@@ -24,7 +24,7 @@ INSTRUCTIONS
 
 SYNOPSIS
   plot-llm-value [plot] [SELECTION] [--metric METRIC] [--reasoning-only]
-                 [--linear-x] [--no-pareto] [--output PATH]
+                 [--linear-x] [--no-pareto] [--no-capability-lines] [--output PATH]
   plot-llm-value data [SELECTION] [--metric METRIC] [--reasoning-only]
   plot-llm-value models [SELECTION] [--reasoning-only]
   plot-llm-value help | --help | -h
@@ -43,7 +43,10 @@ COMMANDS
       that no other plotted point beats on both axes; --no-pareto omits it.
       A row with a score but no plottable cost (cost unavailable, or zero cost on
       a log axis) becomes a thin horizontal line at its score, labelled with the
-      reason, and is listed in capability_only. An unpriced effort whose rank falls
+      reason, and is listed in capability_only. Past 12 such rows the lines would
+      hide the priced points, so none are drawn, the footer says so, and the JSON
+      still lists every row (capability_lines_drawn reports which happened).
+      --no-capability-lines omits them regardless. An unpriced effort whose rank falls
       inside a dashed effort gap of its own family instead becomes a hollow point
       on that segment: its score is measured, its cost interpolated by effort rank
       between the two measured neighbours, reported in inferred_cost with its
@@ -82,6 +85,9 @@ OPTIONS
   --linear-x                 Linear cost axis; default is logarithmic.
   --no-pareto                Plot only; omit the Pareto frontier line, which is
                              drawn by default. JSON Pareto fields are unaffected.
+  --no-capability-lines      Plot only; never draw horizontal capability lines
+                             for scored rows without a plottable cost. They stay
+                             in capability_only. Hollow gap points are unaffected.
   --output PATH              Plot only; .png, .svg or .pdf. Parent must exist.
   --timeout SECONDS          Positive per-request timeout (default 30).
   --env-file PATH            Read API key from this dotenv file explicitly.

@@ -14,7 +14,13 @@ from plot_llm_value.data import (
     normalize,
     pareto_frontier,
 )
-from plot_llm_value.plot import BACKGROUND, PARETO_COLOR, build_figure, save_plot
+from plot_llm_value.plot import (
+    BACKGROUND,
+    CAPABILITY_LINE_LIMIT,
+    PARETO_COLOR,
+    build_figure,
+    save_plot,
+)
 
 
 def comparison(raw):
@@ -153,6 +159,48 @@ def test_unpriced_effort_inside_a_gap_becomes_a_hollow_interpolated_point(raw_mo
     assert "id-gap" not in [row["id"] for row in info["capability_only"]]
     assert "id-gap" not in [row["id"] for row in info["pareto_frontier"]]
     plt.close(fig)
+
+
+def test_no_capability_lines_hides_the_lines_but_keeps_the_rows_in_the_result(raw_models):
+    fig, info = build_figure(comparison(raw_models), capability_lines=False)
+    ax = fig.axes[0]
+    assert not [line for line in ax.lines if str(line.get_gid()).startswith("capability:")]
+    labels = [text.get_text() for text in ax.texts]
+    assert "Gamma (Non-reasoning, high)" not in labels
+    legend = [text.get_text() for text in ax.get_legend().get_texts()]
+    # Gamma has nothing drawn, so it gets no legend entry; the explainer goes too.
+    assert "Gamma" not in legend and "Capability only (no measured cost)" not in legend
+    assert info["capability_lines_drawn"] is False
+    assert [row["name"] for row in info["capability_only"]] == [
+        "Gamma (Non-reasoning, high)",
+        "Free Model",
+    ]
+    plt.close(fig)
+
+
+def test_too_many_capability_lines_are_omitted_to_keep_the_plot_readable(raw_models):
+    rows = raw_models[:5]
+    for i in range(CAPABILITY_LINE_LIMIT + 1):
+        row = copy.deepcopy(raw_models[0])
+        row.update(id=f"unpriced-{i}", name=f"Unpriced {i}")
+        row["evaluations"]["artificial_analysis_intelligence_index"] = 20 + i
+        row["artificial_analysis_intelligence_index_cost"]["cost_per_task"]["total_cost"] = None
+        rows.append(row)
+    fig, info = build_figure(comparison(rows))
+    ax = fig.axes[0]
+    assert not [line for line in ax.lines if str(line.get_gid()).startswith("capability:")]
+    assert info["capability_lines_drawn"] is False
+    assert len(info["capability_only"]) == CAPABILITY_LINE_LIMIT + 1
+    assert f"more than {CAPABILITY_LINE_LIMIT}" in fig.texts[-1].get_text()
+    # One fewer, and they are drawn again.
+    fig2, info2 = build_figure(comparison(rows[:-1]))
+    assert info2["capability_lines_drawn"] is True
+    assert (
+        len([line for line in fig2.axes[0].lines if str(line.get_gid()).startswith("capability:")])
+        == CAPABILITY_LINE_LIMIT
+    )
+    plt.close(fig)
+    plt.close(fig2)
 
 
 def test_no_coordinates_fails_instead_of_blank_image(raw_models):
