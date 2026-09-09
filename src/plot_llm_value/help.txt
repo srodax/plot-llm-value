@@ -1,0 +1,100 @@
+NAME
+  plot-llm-value - Compare language model capability against measured task cost.
+
+DESCRIPTION
+  Fetches fresh official Artificial Analysis data on every invocation, follows
+  all pages, and compares model releases and reasoning settings. Use to choose
+  models, inspect cost/capability tradeoffs, or display a comparison in chat.
+  Cost is AA's measured USD per Intelligence Index task, never token pricing.
+  Coding and Agentic plots still use Intelligence Index task costs on the x-axis.
+
+INSTRUCTIONS
+  1. Set ARTIFICIAL_ANALYSIS_API_KEY (or AA_API_KEY). Obtain a key at
+     https://artificialanalysis.ai/data-api . No key is needed for help.
+  2. Run models to discover exact family names, variant names, IDs and slugs.
+  3. Run plot (the default) with providers, model families, or exact variants.
+     Read the JSON result, open image_path with the host's image tool, and
+     respond with ONLY the produced image unless the user requests analysis.
+     A CLI cannot force the host to display images; the agent performs this step.
+  4. Use data for LLM-readable JSON without rendering an image. Inspect excluded
+     rows before drawing conclusions. Lower cost and higher score are better;
+     these benchmark results do not predict every user's workload.
+  5. On failure read stderr; correct selectors or credentials. For HTTP 429,
+     wait the reported Retry-After interval. No stale data or web-scrape fallback.
+
+SYNOPSIS
+  plot-llm-value [plot] [SELECTION] [--metric METRIC] [--linear-x] [--output PATH]
+  plot-llm-value data [SELECTION] [--metric METRIC]
+  plot-llm-value models [SELECTION]
+  plot-llm-value help | --help | -h
+
+COMMANDS
+  plot (default)
+      Fetch all pages and render a PNG. Stdout: JSON with absolute image_path,
+      plotted/excluded counts and source metadata. Creates a unique temporary
+      directory by default; files persist until OS cleanup. --output saves to
+      an explicit .png, .svg or .pdf path (overwrites that file).
+      All available settings of each release are connected in effort order;
+      dashed segments indicate gaps. Model colors and provider marker shapes
+      appear in the legend. Model and effort labels avoid points and lines.
+      Missing/invalid coordinates are excluded and reported. Zero cost is valid
+      in data and linear plots but excluded on log x. Fails if nothing can plot.
+  data
+      Same live selection as plot; stdout: JSON with metadata, normalized rows,
+      all three indices, cost, selected score, exclusion reasons and Pareto
+      membership among comparable rows. No files. Zero cost is retained.
+  models
+      Fetch the live catalog; stdout: JSON with family, effort, provider, exact
+      name, slug and ID for each row. Includes rows with missing measurements.
+      No files. Selection flags may narrow the catalog.
+  help, --help, -h
+      Print this guide verbatim; no network or file writes. Exit 0.
+
+OPTIONS
+  SELECTION: choose ONE mode; omit to select all models. Values within a mode
+  are unioned. Repeat the flag or supply several quoted values after one flag.
+  --provider NAME [NAME ...]  Creator name, slug or ID (e.g. anthropic openai).
+                             Provider means model creator, not inference host.
+  --model FAMILY [FAMILY ...] Exact release family; includes ALL its efforts.
+  --variant NAME [NAME ...]   Exact AA row name, slug or ID; only those settings.
+                             Names are case-insensitive; no substring matching.
+                             Unknown/ambiguous selections fail, never guess.
+  --metric METRIC            intelligence (default), coding, agentic (or agent).
+  --linear-x                 Linear cost axis; default is logarithmic.
+  --output PATH              Plot only; .png, .svg or .pdf. Parent must exist.
+  --timeout SECONDS          Positive per-request timeout (default 30).
+  --env-file PATH            Read API key from this dotenv file explicitly.
+                             Process environment takes precedence. No automatic
+                             search for config or .env files; no shell evaluation.
+  --help, -h                 Show this complete guide from any command.
+
+EXIT STATUS
+  0  Success.
+  1  API/network, invalid response, missing key, or output-file error.
+  2  Usage, unknown/ambiguous selection, or no comparable measurements.
+  Errors go to stderr; stdout contains only a complete success result.
+
+ENVIRONMENT
+  ARTIFICIAL_ANALYSIS_API_KEY  API key; takes precedence over AA_API_KEY.
+  AA_API_KEY                 Alternative key name.
+  TMPDIR, TEMP, TMP          Python's standard temporary-directory locations.
+  MPLCONFIGDIR              Optional Matplotlib config/cache directory.
+
+EXAMPLES
+  # After setting the API key in your environment:
+  plot-llm-value models --provider anthropic openai
+  plot-llm-value --provider anthropic openai
+  plot-llm-value plot --model 'gpt-oss-20B' --metric coding
+  plot-llm-value data --variant 'gpt-oss-20B (high)'
+  plot-llm-value --provider anthropic --metric agentic --linear-x --output compare.svg
+  plot-llm-value --env-file .env --provider openai
+
+OUTPUT
+  Plot: {"image_path":"/tmp/plot-llm-value-.../comparison.png", ...}
+  Agent: display that image inline, with no extra prose by default.
+  Data: {"schema_version":1,"source":{...},"metric":{...},"rows":[...], ...}
+  Source includes endpoint, retrieval time and AA Intelligence Index version.
+  Null means unavailable, never zero. Exclusions are explicit. Pareto optimal
+  means no selected comparable row is both no costlier and at least as capable,
+  with one strict improvement. Exact ties remain on the frontier together.
+  Attribution: Artificial Analysis — https://artificialanalysis.ai/

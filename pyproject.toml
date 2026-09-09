@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "plot-llm-value"
+version = "0.1.0"
+description = "Live Artificial Analysis capability vs task-cost plots for agents"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["matplotlib>=3.8,<4", "httpx>=0.27,<1", "python-dotenv>=1,<2"]
+
+[project.scripts]
+plot-llm-value = "plot_llm_value.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.11"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
