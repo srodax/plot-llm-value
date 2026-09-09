@@ -74,6 +74,37 @@ def effort_order(effort):
     return (99, base)
 
 
+def _dominates(other, row):
+    """True when `other` is no costlier and no less capable, and strictly better once."""
+    return (
+        other["cost_per_task_usd"] <= row["cost_per_task_usd"]
+        and other["score"] >= row["score"]
+        and (other["cost_per_task_usd"] < row["cost_per_task_usd"] or other["score"] > row["score"])
+    )
+
+
+def pareto_frontier(rows):
+    """Undominated rows, ordered by cost. Exact ties stay on the frontier together.
+
+    Rows must carry a numeric score and cost. Membership depends on the set given:
+    the frontier of the comparable rows is not the frontier of the plotted ones.
+    """
+    return sorted(
+        (row for row in rows if not any(_dominates(other, row) for other in rows)),
+        key=lambda row: (row["cost_per_task_usd"], row["score"], row["id"]),
+    )
+
+
+def is_non_reasoning(row):
+    """True when AA marks the row's reasoning as turned off.
+
+    Only the explicit marker counts. A row with no effort qualifier at all is a
+    single-configuration model, not a non-reasoning variant, so it is kept.
+    """
+    effort = (row["effort"] or "").casefold()
+    return effort.startswith("non-reasoning") or effort == "none"
+
+
 def _number(value, *, nonnegative=False):
     if type(value) in (int, float) and math.isfinite(value):
         if not nonnegative or value >= 0:
@@ -175,16 +206,9 @@ def compare(rows, metric="intelligence"):
             }
         )
     comparable = [r for r in result if r["comparable"]]
+    optimal = {row["id"] for row in pareto_frontier(comparable)}
     for row in comparable:
-        row["pareto_optimal"] = not any(
-            other["cost_per_task_usd"] <= row["cost_per_task_usd"]
-            and other["score"] >= row["score"]
-            and (
-                other["cost_per_task_usd"] < row["cost_per_task_usd"]
-                or other["score"] > row["score"]
-            )
-            for other in comparable
-        )
+        row["pareto_optimal"] = row["id"] in optimal
     return {
         "schema_version": 1,
         "metric": {"key": metric, "label": METRICS[metric], "higher_is_better": True},

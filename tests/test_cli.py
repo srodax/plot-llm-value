@@ -63,6 +63,35 @@ def test_default_plot_returns_ephemeral_image_path(live_api, capsys):
     path.parent.rmdir()
 
 
+def test_plot_reports_the_frontier_and_no_pareto_is_accepted(live_api, capsys, tmp_path):
+    path = tmp_path / "comparison.png"
+    assert main(["--output", str(path)]) == 0
+    assert [row["name"] for row in json.loads(capsys.readouterr().out)["pareto_frontier"]][0] == (
+        "Alpha (low)"
+    )
+    assert main(["--no-pareto", "--output", str(path)]) == 0
+    assert len(json.loads(capsys.readouterr().out)["pareto_frontier"]) == 5
+
+
+def test_reasoning_only_drops_marked_variants_and_keeps_unqualified_models(live_api, capsys):
+    assert main(["models"]) == 0
+    everything = json.loads(capsys.readouterr().out)["rows"]
+    assert main(["models", "--reasoning-only"]) == 0
+    kept = json.loads(capsys.readouterr().out)
+    names = [row["name"] for row in kept["rows"]]
+    assert "Gamma (Non-reasoning, high)" in [row["name"] for row in everything]
+    assert "Gamma (Non-reasoning, high)" not in names
+    # No effort qualifier means a single-configuration model, which is not filtered.
+    assert "Free Model" in names
+    assert kept["filters"] == {"reasoning_only": True}
+
+
+def test_reasoning_only_that_empties_the_selection_is_an_error(live_api, capsys):
+    assert main(["data", "--variant", "Gamma (Non-reasoning, high)", "--reasoning-only"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == "" and "--reasoning-only" in captured.err
+
+
 def test_repeated_flags_union_models_and_explicit_output(live_api, capsys, tmp_path):
     path = tmp_path / "comparison.svg"
     assert main(["plot", "--model", "Alpha", "--model", "Beta", "--output", str(path)]) == 0
@@ -84,6 +113,7 @@ def test_catalog_retains_missing_scores_and_prints_selectors(live_api, capsys):
         ["--provider", "missing"],
         ["--model", "Alpha", "--variant", "id-0"],
         ["data", "--linear-x"],
+        ["data", "--no-pareto"],
         ["data", "--output", "x.png"],
         ["--timeout", "nan"],
         ["--timeout", "-1"],

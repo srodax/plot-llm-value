@@ -17,11 +17,13 @@ from matplotlib.path import Path as MplPath
 from matplotlib.ticker import FuncFormatter, LogLocator, MaxNLocator, NullFormatter
 from matplotlib.transforms import Bbox
 
-from .data import SelectionError, effort_order
+from .data import SelectionError, effort_order, pareto_frontier
 
 BACKGROUND = "#FBFAF7"
 COLORS = ["#6B4F9B", "#D97745", "#2C7A7B", "#4C78A8", "#59A14F", "#B279A2", "#8C6D31", "#B64857"]
 MARKERS = ["o", "s", "^", "D", "v", "P", "X", "<", ">", "h", "*"]
+PARETO_COLOR = "#4A4A4A"
+PARETO_DASHES = (7, 3.5)
 
 
 def _place_labels(ax, requests, point_positions, segments):
@@ -129,45 +131,129 @@ def _place_labels(ax, requests, point_positions, segments):
     return True
 
 
-def build_figure(comparison, *, linear_x=False):
-    groups, excluded = defaultdict(list), []
+def _inferred_cost(row, gaps, *, linear_x):
+    """Cost implied for an unpriced effort by the dashed segment spanning its rank.
+
+    Only the cost is guessed: the score is AA's own measurement. The effort is
+    placed at its rank's share of the gap, in the axis's own spacing. Returns
+    None when no gap of measured neighbors spans the effort's rank.
+    """
+    rank = effort_order(row["effort"])[0]
+    for start, end in gaps:
+        low, high = effort_order(start["effort"])[0], effort_order(end["effort"])[0]
+        if low < rank < high:
+            fraction = (rank - low) / (high - low)
+            a, b = start["cost_per_task_usd"], end["cost_per_task_usd"]
+            if linear_x:
+                return a + fraction * (b - a), (start, end)
+            return math.exp(math.log(a) + fraction * math.log(b / a)), (start, end)
+    return None
+
+
+def build_figure(comparison, *, linear_x=False, pareto=True, reasoning_only=False):
+    groups, capability_only, excluded = defaultdict(list), defaultdict(list), []
     for row in comparison["rows"]:
-        reasons = list(row["exclusion_reasons"])
-        if not linear_x and row["cost_per_task_usd"] == 0:
-            reasons.append("zero cost cannot appear on log x; use --linear-x")
-        if reasons:
-            excluded.append({"id": row["id"], "name": row["name"], "reasons": reasons})
+        key = (row["provider_id"], row["family"])
+        if row["score"] is None:
+            excluded.append(
+                {"id": row["id"], "name": row["name"], "reasons": list(row["exclusion_reasons"])}
+            )
+        elif row["cost_per_task_usd"] is None:
+            capability_only[key].append((row, "cost unavailable"))
+        elif row["cost_per_task_usd"] == 0 and not linear_x:
+            capability_only[key].append((row, "zero cost on log x"))
         else:
-            groups[(row["provider_id"], row["family"])].append(row)
+            groups[key].append(row)
     if not groups:
         raise SelectionError(
-            "No comparable measurements to plot; inspect data or use --linear-x for zero cost."
+            "No measured costs to plot; a cost axis needs at least one measured cost."
         )
     count = sum(map(len, groups.values()))
-    label_count = count + len(groups)
+    flat = [entry for entries in capability_only.values() for entry in entries]
+    label_count = count + len(groups) + 2 * len(flat)
     scale = max(1, math.sqrt(label_count / 45))
     providers = sorted({r["provider"] for rows in groups.values() for r in rows})
     marker_map = {p: MARKERS[i % len(MARKERS)] for i, p in enumerate(providers)}
+    keys = sorted(set(groups) | set(capability_only))
+    # The frontier follows the measured points only. A row without a cost states
+    # nothing about cost, so it can neither dominate nor be dominated.
+    frontier = pareto_frontier([r for rows in groups.values() for r in rows])
+    # Always reported in the result; --no-pareto only suppresses the drawn line.
+    frontier_xy = [(r["cost_per_task_usd"], r["score"]) for r in frontier] if pareto else []
     for expansion in (1, 1.3, 1.7):
         width, height = 10 * scale * expansion, 7.2 * scale * expansion
         fig, ax = plt.subplots(figsize=(width, height), dpi=180)
         fig.patch.set_facecolor(BACKGROUND)
         ax.set_facecolor(BACKGROUND)
-        legend_rows = math.ceil(len(groups) / 4) + (
+        legend_rows = math.ceil(len(keys) / 4) + (
             math.ceil(len(providers) / 5) if len(providers) > 1 else 0
         )
         bottom = max(0.22, (0.85 + legend_rows * 0.19) / height)
         fig.subplots_adjust(left=0.095, right=0.96, top=0.85, bottom=min(bottom, 0.48))
         ax.set_xscale("linear" if linear_x else "log")
         requests, handles, coordinates, data_segments = [], [], [], []
-        efforts = []
-        for i, ((provider_id, family), rows) in enumerate(sorted(groups.items())):
-            rows = sorted(rows, key=lambda r: (effort_order(r["effort"]), r["id"]))
+        efforts, flat_labels, flat_rows, inferred_rows = [], [], [], []
+        for i, (provider_id, family) in enumerate(keys):
+            rows = sorted(
+                groups.get((provider_id, family), []),
+                key=lambda r: (effort_order(r["effort"]), r["id"]),
+            )
             color = (
                 COLORS[i % len(COLORS)]
-                if len(groups) <= len(COLORS)
-                else plt.cm.turbo((i + 0.5) / len(groups))
+                if len(keys) <= len(COLORS)
+                else plt.cm.turbo((i + 0.5) / len(keys))
             )
+            gaps = [
+                (start, end)
+                for start, end in zip(rows, rows[1:])
+                if effort_order(end["effort"])[0] - effort_order(start["effort"])[0] > 1
+            ]
+            unpriced = sorted(
+                capability_only.get((provider_id, family), []),
+                key=lambda entry: (effort_order(entry[0]["effort"]), entry[0]["id"]),
+            )
+            inferred = []
+            for row, reason in unpriced:
+                # An unpriced effort that falls inside its own family's gap is a
+                # guess the dashed segment already makes; a measured zero cost is
+                # not a guess, so it keeps its capability line.
+                guess = (
+                    _inferred_cost(row, gaps, linear_x=linear_x)
+                    if reason == "cost unavailable"
+                    else None
+                )
+                if guess is None:
+                    line = ax.axhline(row["score"], color=color, lw=0.7, alpha=0.55, zorder=1.2)
+                    line.set_gid(f"capability:{row['id']}")
+                    # An unavailable cost is what the line itself means; a measured
+                    # zero cost is a different fact and still worth spelling out.
+                    label = (
+                        row["name"] if reason == "cost unavailable" else f"{row['name']} · {reason}"
+                    )
+                    flat_labels.append((label, row["score"], color))
+                    flat_rows.append(
+                        {
+                            "id": row["id"],
+                            "name": row["name"],
+                            "score": row["score"],
+                            "reason": reason,
+                        }
+                    )
+                else:
+                    cost, (start, end) = guess
+                    inferred.append((row, cost))
+                    inferred_rows.append(
+                        {
+                            "id": row["id"],
+                            "name": row["name"],
+                            "score": row["score"],
+                            "inferred_cost_usd": cost,
+                            "interpolated_between": [start["name"], end["name"]],
+                        }
+                    )
+            if not rows:
+                handles.append(Line2D([], [], color=color, lw=0.7, label=family))
+                continue
             marker = marker_map[rows[0]["provider"]]
             xy = [(r["cost_per_task_usd"], r["score"]) for r in rows]
             coordinates.extend(xy)
@@ -202,11 +288,48 @@ def build_figure(comparison, *, linear_x=False):
             for row, point in zip(rows, xy):
                 if row["effort"]:
                     efforts.append((row["effort"], [point], color, False))
+            if inferred:
+                guessed_xy = [(cost, row["score"]) for row, cost in inferred]
+                hollow = ax.scatter(
+                    *zip(*guessed_xy),
+                    s=60,
+                    marker=marker,
+                    facecolor=BACKGROUND,
+                    edgecolor=color,
+                    linewidth=1.6,
+                    zorder=3,
+                )
+                hollow.set_gid(f"inferred:{provider_id}:{family}")
+                coordinates.extend(guessed_xy)
+                for (row, _), point in zip(inferred, guessed_xy):
+                    efforts.append((f"{row['effort']}?", [point], color, False))
             handles.append(Line2D([], [], color=color, marker=marker, lw=2, label=family))
+        if len(frontier_xy) > 1:
+            (line,) = ax.plot(
+                *zip(*frontier_xy),
+                color=PARETO_COLOR,
+                lw=1.6,
+                alpha=0.6,
+                zorder=1.5,
+                # A longer dash than the effort-gap segments, which are colored.
+                dashes=PARETO_DASHES,
+            )
+            line.set_gid("pareto")
+            data_segments.extend(zip(frontier_xy, frontier_xy[1:]))
         ax.margins(x=0.18, y=0.2)
         if linear_x:
             low, high = ax.get_xlim()
             ax.set_xlim(max(0, low), high)
+        # Anchors span the settled x-range: a capability-only label may sit
+        # anywhere along its line, wherever the layout has room.
+        low, high = ax.get_xlim()
+        spread = (
+            np.linspace(low, high, 9)
+            if linear_x
+            else np.logspace(math.log10(low), math.log10(high), 9)
+        )
+        for label, score, color in flat_labels:
+            requests.append((label, [(x, score) for x in spread], color, False))
         ax.grid(True, which="major", color="#DEDCD6", lw=0.8)
         ax.grid(True, which="minor", axis="x", color="#ECEAE4", lw=0.5)
         ax.set_axisbelow(True)
@@ -242,13 +365,67 @@ def build_figure(comparison, *, linear_x=False):
                 Line2D([], [], color="#555555", marker=marker_map[p], lw=0, label=p)
                 for p in providers
             )
+        if flat_labels:
+            handles.append(
+                Line2D([], [], color="#555555", lw=0.7, label="Capability only (no measured cost)")
+            )
+        if inferred_rows:
+            handles.append(
+                Line2D(
+                    [],
+                    [],
+                    color="#555555",
+                    markerfacecolor=BACKGROUND,
+                    markeredgecolor="#555555",
+                    marker="o",
+                    lw=0,
+                    label="Hollow: cost inferred from gap",
+                )
+            )
+        if len(frontier_xy) > 1:
+            handles.append(
+                Line2D(
+                    [],
+                    [],
+                    color=PARETO_COLOR,
+                    alpha=0.6,
+                    lw=1.6,
+                    # Shorter dashes than the drawn line, which the short
+                    # legend swatch would otherwise render as one solid stroke.
+                    dashes=(4, 2),
+                    label="Pareto frontier",
+                )
+            )
         source = comparison.get("source", {})
         fig.text(
             0.095,
             0.025,
             "Source: Artificial Analysis · https://artificialanalysis.ai/\n"
             f"Retrieved {source.get('retrieved_at', 'unknown')} · Intelligence Index v{source.get('intelligence_index_version', '?')}\n"
-            f"{count} / {len(comparison['rows'])} rows plotted · Dashed: effort gap · Costs use Intelligence Index tasks",
+            f"{count} / {len(comparison['rows'])} rows plotted · Dashed color: effort gap · Costs use Intelligence Index tasks"
+            + (
+                "\nNon-reasoning variants excluded (--reasoning-only), so the frontier "
+                "describes reasoning settings only"
+                if reasoning_only
+                else ""
+            )
+            + (
+                f"\n{len(flat_labels)} scored row(s) have no plottable cost: thin capability line "
+                "at the score, kept off the frontier"
+                if flat_labels
+                else ""
+            )
+            + (
+                f"\n{len(inferred_rows)} unpriced effort(s) sit hollow on their dashed gap: score "
+                "measured, cost interpolated by effort rank, kept off the frontier"
+                if inferred_rows
+                else ""
+            )
+            + (
+                "\nDashed grey Pareto frontier: no plotted model is both cheaper and at least as capable"
+                if len(frontier_xy) > 1
+                else ""
+            ),
             fontsize=6.5,
             color="#666666",
             linespacing=1.4,
@@ -289,7 +466,18 @@ def build_figure(comparison, *, linear_x=False):
                 "plotted_count": count,
                 "excluded_count": len(excluded),
                 "excluded": excluded,
+                "capability_only": flat_rows,
+                "inferred_cost": inferred_rows,
                 "x_scale": "linear" if linear_x else "log",
+                "pareto_frontier": [
+                    {
+                        "id": row["id"],
+                        "name": row["name"],
+                        "cost_per_task_usd": row["cost_per_task_usd"],
+                        "score": row["score"],
+                    }
+                    for row in frontier
+                ],
             }
         plt.close(fig)
     raise SelectionError(
@@ -297,14 +485,16 @@ def build_figure(comparison, *, linear_x=False):
     )
 
 
-def save_plot(comparison, path=None, *, linear_x=False):
+def save_plot(comparison, path=None, *, linear_x=False, pareto=True, reasoning_only=False):
     if path is not None:
         path = Path(path).expanduser().resolve()
         if path.suffix.lower() not in {".png", ".svg", ".pdf"}:
             raise SelectionError("--output must end in .png, .svg, or .pdf.")
         if not path.parent.is_dir():
             raise OSError("Output parent directory does not exist.")
-    fig, info = build_figure(comparison, linear_x=linear_x)
+    fig, info = build_figure(
+        comparison, linear_x=linear_x, pareto=pareto, reasoning_only=reasoning_only
+    )
     try:
         if path is None:
             path = Path(tempfile.mkdtemp(prefix="plot-llm-value-")) / "comparison.png"

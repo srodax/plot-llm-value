@@ -23,22 +23,34 @@ INSTRUCTIONS
      wait the reported Retry-After interval. No stale data or web-scrape fallback.
 
 SYNOPSIS
-  plot-llm-value [plot] [SELECTION] [--metric METRIC] [--linear-x] [--output PATH]
-  plot-llm-value data [SELECTION] [--metric METRIC]
-  plot-llm-value models [SELECTION]
+  plot-llm-value [plot] [SELECTION] [--metric METRIC] [--reasoning-only]
+                 [--linear-x] [--no-pareto] [--output PATH]
+  plot-llm-value data [SELECTION] [--metric METRIC] [--reasoning-only]
+  plot-llm-value models [SELECTION] [--reasoning-only]
   plot-llm-value help | --help | -h
 
 COMMANDS
   plot (default)
       Fetch all pages and render a PNG. Stdout: JSON with absolute image_path,
-      plotted/excluded counts and source metadata. Creates a unique temporary
-      directory by default; files persist until OS cleanup. --output saves to
-      an explicit .png, .svg or .pdf path (overwrites that file).
-      All available settings of each release are connected in effort order;
-      dashed segments indicate gaps. Model colors and provider marker shapes
-      appear in the legend. Model and effort labels avoid points and lines.
-      Missing/invalid coordinates are excluded and reported. Zero cost is valid
-      in data and linear plots but excluded on log x. Fails if nothing can plot.
+      plotted/excluded counts, capability_only, inferred_cost and pareto_frontier
+      rows, and source metadata.
+      Creates a unique temporary directory by default; files persist until OS
+      cleanup. --output saves to an explicit .png, .svg or .pdf path (overwrites
+      that file). All available settings of each release are connected in effort
+      order; dashed segments indicate gaps. Model colors and provider marker
+      shapes appear in the legend. Model and effort labels avoid points and lines.
+      A dashed grey Pareto frontier is drawn by default through the plotted points
+      that no other plotted point beats on both axes; --no-pareto omits it.
+      A row with a score but no plottable cost (cost unavailable, or zero cost on
+      a log axis) becomes a thin horizontal line at its score, labelled with the
+      reason, and is listed in capability_only. An unpriced effort whose rank falls
+      inside a dashed effort gap of its own family instead becomes a hollow point
+      on that segment: its score is measured, its cost interpolated by effort rank
+      between the two measured neighbours, reported in inferred_cost with its
+      effort label suffixed '?'. Neither kind joins the frontier, which needs
+      measured costs; a measured zero cost is never treated as a guess.
+      Only a missing score removes a row; those are excluded and reported.
+      Fails if no row has a measured cost, since the x-axis would be empty.
   data
       Same live selection as plot; stdout: JSON with metadata, normalized rows,
       all three indices, cost, selected score, exclusion reasons and Pareto
@@ -60,7 +72,16 @@ OPTIONS
                              Names are case-insensitive; no substring matching.
                              Unknown/ambiguous selections fail, never guess.
   --metric METRIC            intelligence (default), coding, agentic (or agent).
+  --reasoning-only           Drop variants AA marks Non-reasoning (or 'none').
+                             Applies to every command and changes the frontier,
+                             which is always relative to the rows kept. A row
+                             with no effort qualifier is a single-configuration
+                             model, not a non-reasoning variant, so it is kept.
+                             Most such variants have a score but no measured
+                             cost, so they can only be capability lines here.
   --linear-x                 Linear cost axis; default is logarithmic.
+  --no-pareto                Plot only; omit the Pareto frontier line, which is
+                             drawn by default. JSON Pareto fields are unaffected.
   --output PATH              Plot only; .png, .svg or .pdf. Parent must exist.
   --timeout SECONDS          Positive per-request timeout (default 30).
   --env-file PATH            Read API key from this dotenv file explicitly.
@@ -87,6 +108,8 @@ EXAMPLES
   plot-llm-value plot --model 'gpt-oss-20B' --metric coding
   plot-llm-value data --variant 'gpt-oss-20B (high)'
   plot-llm-value --provider anthropic --metric agentic --linear-x --output compare.svg
+  plot-llm-value --provider google --no-pareto
+  plot-llm-value --provider anthropic openai --reasoning-only
   plot-llm-value --env-file .env --provider openai
 
 OUTPUT
@@ -94,7 +117,10 @@ OUTPUT
   Agent: display that image inline, with no extra prose by default.
   Data: {"schema_version":1,"source":{...},"metric":{...},"rows":[...], ...}
   Source includes endpoint, retrieval time and AA Intelligence Index version.
+  Every result echoes the applied filters, so a frontier can be reproduced.
   Null means unavailable, never zero. Exclusions are explicit. Pareto optimal
   means no selected comparable row is both no costlier and at least as capable,
   with one strict improvement. Exact ties remain on the frontier together.
+  The drawn line and pareto_frontier use only the plotted rows, so they can
+  differ from data's pareto_optimal whenever a row is excluded from the plot.
   Attribution: Artificial Analysis — https://artificialanalysis.ai/

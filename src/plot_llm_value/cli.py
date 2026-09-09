@@ -11,7 +11,7 @@ from pathlib import Path
 from dotenv import dotenv_values
 
 from .api import APIError, fetch_models
-from .data import SelectionError, compare, normalize, select
+from .data import SelectionError, compare, is_non_reasoning, normalize, select
 
 
 class Parser(argparse.ArgumentParser):
@@ -30,13 +30,15 @@ def _arguments(argv):
     parser.add_argument(
         "--metric", choices=["intelligence", "coding", "agentic", "agent"], default="intelligence"
     )
+    parser.add_argument("--reasoning-only", action="store_true")
     parser.add_argument("--linear-x", action="store_true")
+    parser.add_argument("--no-pareto", action="store_true")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--env-file", type=Path)
     args = parser.parse_args(argv)
-    if command != "plot" and (args.linear_x or args.output):
-        raise SelectionError("--linear-x and --output are plot-only options.")
+    if command != "plot" and (args.linear_x or args.no_pareto or args.output):
+        raise SelectionError("--linear-x, --no-pareto and --output are plot-only options.")
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         raise SelectionError("--timeout must be positive and finite.")
     if args.output and args.output.suffix.lower() not in {".png", ".svg", ".pdf"}:
@@ -72,6 +74,12 @@ def main(argv=None):
             models=args.model,
             variants=args.variant,
         )
+        if args.reasoning_only:
+            rows = [row for row in rows if not is_non_reasoning(row)]
+            if not rows:
+                raise SelectionError(
+                    "--reasoning-only removed every selected row; drop it or widen the selection."
+                )
         if command == "models":
             result = {"schema_version": 1, "source": snapshot["source"], "rows": rows}
         else:
@@ -80,7 +88,14 @@ def main(argv=None):
             if command == "plot":
                 from .plot import save_plot
 
-                result = save_plot(result, args.output, linear_x=args.linear_x)
+                result = save_plot(
+                    result,
+                    args.output,
+                    linear_x=args.linear_x,
+                    pareto=not args.no_pareto,
+                    reasoning_only=args.reasoning_only,
+                )
+        result["filters"] = {"reasoning_only": args.reasoning_only}
         print(json.dumps(result, ensure_ascii=False, allow_nan=False, indent=2))
         return 0
     except SelectionError as error:

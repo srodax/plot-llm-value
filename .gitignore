@@ -7,3 +7,4 @@ dist/
 .env
 .firecrawl/
 .ruff_cache/
+/comparison.png

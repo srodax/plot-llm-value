@@ -15,7 +15,11 @@ Implementation units and order:
   consistency, rate limits, invalid JSON/schema, duplicate IDs and retries.
 - [x] Comparison: `data.py`, tests of effort grouping (preserve release names),
   all three selector modes, metric choice, null/zero values and Pareto frontier.
-- [x] Plot: `plot.py`, tests of connected effort order, colors/provider markers,
+- [x] Plot: `plot.py`, tests of the default Pareto frontier line over plotted
+  rows and its `--no-pareto` suppression, capability lines for scored-but-unpriced
+  rows, hollow interpolated points for unpriced efforts inside a gap, an audit
+  that every drawn coordinate traces back to a row and the frontier is the
+  complete undominated set, connected effort order, colors/provider markers,
   log/linear coordinates, automatic label geometry and exported artifacts.
   Use display-space candidate placement scored against labels, points and
   line segments, with leader lines and an expanded layout for dense inputs.

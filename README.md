@@ -35,7 +35,20 @@ uv run plot-llm-value data --variant 'gpt-oss-20B (high)'
 
 # Agentic Index, linear cost axis, persistent export.
 uv run plot-llm-value --provider anthropic --metric agentic --linear-x --output compare.svg
+
+# Reasoning settings only, dropping the variants AA marks Non-reasoning.
+uv run plot-llm-value --provider anthropic openai --reasoning-only
 ```
+
+`--reasoning-only` drops variants AA marks `Non-reasoning` (or `none`) from every
+command, and every result echoes the filters it applied. It is off by default
+because the frontier is always relative to the rows kept, and hiding a measured
+row should be a visible choice. A row with **no** effort qualifier is a
+single-configuration model rather than a non-reasoning variant, so it is kept —
+several such models sit on the frontier. In AA's current data the flag mostly
+removes clutter: of 97 non-reasoning variants in the catalog, 2 have a measured
+cost per task and none are on the full-catalog frontier, so the rest can only ever
+appear here as capability lines.
 
 `--help` is the complete operating guide: selectors, API-key precedence, error
 codes, output schemas and the image-display workflow. No separate agent skill is
@@ -45,7 +58,17 @@ Plots include model names beside their groups, effort labels, model colors,
 provider marker shapes, and legends. Labels are placed in rendered coordinates
 against points, series and other labels; leader lines are clipped around text.
 The canvas grows for larger selections. Dashed connections mark gaps in known
-effort ranks; missing intermediate measurements are never interpolated.
+effort ranks.
+
+A dashed grey **Pareto frontier** is drawn by default, as on the Artificial Analysis
+charts: it connects the plotted points that no other plotted point beats on both
+axes at once, so its height at any cost is the best score available at or below
+that cost, and every point below it is dominated. It is a hull of real data
+points, not a fit — a segment's slope is an artifact of which two models happen
+to be adjacent, not an exchange rate between index points and dollars. Membership
+depends on the selection shown, and the drawn line uses only the plotted rows, so
+it can differ from `data`'s `pareto_optimal` when a row is excluded from the plot.
+`--no-pareto` omits the line; the returned JSON still lists `pareto_frontier`.
 
 The default output is a JSON result containing the absolute path to a temporary
 PNG. This is more useful to shell-based agents than binary stdout: they can open
@@ -53,6 +76,23 @@ that path with their image tool and display **only the plot** in chat, as the he
 instructs. Display depends on the host agent; the CLI cannot control chat rendering.
 Temporary files persist until OS cleanup. Use `--output` for PNG, SVG or PDF you
 want to keep.
+
+A model AA scores but does not price — cost unavailable, or zero cost on a
+logarithmic axis — is drawn as a thin horizontal line at its capability, labelled
+with the reason and listed in `capability_only`. Only a missing score drops a row
+from the plot. A selection where nothing has a measured cost fails, because a cost
+axis with no costs on it would be fiction.
+
+An unpriced reasoning setting whose **effort rank falls inside a dashed gap of its
+own family** is instead drawn as a hollow point on that dashed segment, its effort
+label suffixed `?`, and listed in `inferred_cost` with the two neighbours it sits
+between. Only the cost is guessed — interpolated by effort rank, in the axis's own
+spacing — while the score is AA's measurement. Treat these points as the dashed
+line's own suggestion, not as data: effort ranks need not be evenly spaced in cost,
+and a family may simply not offer the setting the ladder implies.
+
+Neither hollow points nor capability lines join the Pareto frontier: a row with no
+measured cost makes no claim about cost, so it can neither dominate nor be dominated.
 
 `data` produces structured JSON with all three indices, selected score, measured
 cost, explicit exclusions, source/version/retrieval metadata and Pareto membership.
